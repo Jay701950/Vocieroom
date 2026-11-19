@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>보이스룸</title>
+<style>
+:root{color-scheme:dark;--bg:#1e1f22;--card:#2b2d31;--ok:#23c55e;--pri:#5865f2}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:#eee;font:15px/1.4 system-ui,sans-serif;padding:max(10px,env(safe-area-inset-top)) 12px max(10px,env(safe-area-inset-bottom));max-width:640px;margin:auto}
+header{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0}
+header span{display:flex;align-items:center;gap:6px}
+button{background:var(--pri);color:#fff;border:0;border-radius:8px;padding:9px 14px;font:inherit}
+button.red{background:#da373c}
+input,select{background:var(--bg);color:#eee;border:1px solid #444;border-radius:8px;padding:9px;font:inherit}
+.card{background:var(--card);border-radius:12px;padding:12px;margin:10px 0;display:flex;flex-wrap:wrap;gap:8px}
+.card input{flex:1;min-width:0}
+.row{justify-content:space-between;align-items:center}
+.av{width:84px;height:84px;border-radius:50%;margin:auto;background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center;font-size:34px;font-weight:700;transition:box-shadow .12s}
+.av.sm{width:30px;height:30px;font-size:14px;margin:0}
+#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:18px 10px;margin:20px 0;text-align:center}
+.nm{margin-top:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.speak .av{box-shadow:0 0 0 4px var(--ok),0 0 18px 6px #23c55e88}
+.bar{position:sticky;bottom:12px;display:flex;gap:10px;justify-content:center}
+</style></head><body>
+<header><b>🎙 보이스룸</b><span id="acct"></span></header>
+<div id="auth" class="card" hidden>
+  <input id="u" placeholder="이름 (2~12자)" maxlength="12">
+  <input id="p" type="password" placeholder="비밀번호 (6자 이상)">
+  <button onclick="auth('login')">로그인</button><button onclick="auth('signup')">가입</button>
+</div>
+
+<main id="lobby">
+  <div class="card">
+    <input id="rn" placeholder="새 방 이름" maxlength="20">
+    <select id="rm"></select>
+    <button onclick="addRoom()">방 만들기</button>
+  </div>
+  <div id="rooms"></div>
+</main>
+
+<main id="room" hidden>
+  <h3 id="rt"></h3>
+  <div id="grid"></div>
+  <div class="bar"><button id="mute">🎤 마이크 끄기</button><button class="red" onclick="leave()">나가기</button></div>
+</main>
+<div id="audios"></div>
+<input type="file" id="f" accept="image/*" hidden>
+
+<script>
+const $=s=>document.querySelector(s),api=(p,o={})=>fetch('/api/'+p,o);
+const hdr=()=>({'content-type':'application/json','x-token':me?.token||''});
+const btn=(t,f)=>{const b=document.createElement('button');b.textContent=t;b.onclick=f;return b};
+const hue=s=>[...s].reduce((a,c)=>a*31+c.charCodeAt(0),7)%360;
+const ICE={iceServers:[{urls:'stun:stun.l.google.com:19302'}]};
+let me=null,ws,local,ctx,ping,pcs={},timers={},q=Promise.resolve();
+
+$('#rm').innerHTML=[2,3,4,5,6,7,8].map(n=>`<option value="${n}">${n}명</option>`).join('');
+$('#rm').value=4;
+
+// 프사: 등록 안 했으면 이름 첫 글자 + 이름에서 뽑은 색
+function avatarEl(name,av){
+  const d=document.createElement('div');d.className='av';
+  if(av)d.style.backgroundImage=`url("${av}")`;
+  else{d.style.background=`hsl(${hue(name)} 55% 45%)`;d.textContent=[...name][0]||'?'}
+  return d}
+
+// 계정 (Firebase 로그인은 맨 아래 module 스크립트가 처리)
+function setMe(m){me=m;drawAcct()}
+function drawAcct(){
+  const a=$('#acct');a.replaceChildren();
+  if(me){const i=avatarEl(me.name,me.avatar);i.classList.add('sm');i.title='프사 바꾸기';i.onclick=()=>$('#f').click();
+    a.append(i,me.name,btn('로그아웃',()=>fb.logout()))}
+  else{const n=document.createElement('input');n.placeholder='닉네임';n.size=8;n.value=localStorage.nick||'';
+    n.oninput=()=>localStorage.nick=n.value;
+    a.append(n,btn('로그인',()=>$('#auth').hidden=!$('#auth').hidden))}
+}
+const ERR={'auth/weak-password':'비밀번호는 6자 이상이야','auth/email-already-in-use':'이미 있는 이름이야','auth/invalid-credential':'이름/비밀번호를 확인해줘'};
+async function auth(kind){
+  try{await fb[kind]($('#u').value.trim(),$('#p').value);$('#auth').hidden=true;$('#p').value=''}
+  catch(e){alert(ERR[e.code]||e.message)}}
+$('#f').onchange=e=>{
+  const f=e.target.files[0];if(!f||!me)return;const im=new Image();
+  im.onload=()=>{const c=document.createElement('canvas');c.width=c.height=128;const s=Math.min(im.width,im.height);
+    c.getContext('2d').drawImage(im,(im.width-s)/2,(im.height-s)/2,s,s,0,0,128,128);
+    const av=c.toDataURL('image/jpeg',.8);fb.saveAvatar(av).then(()=>setMe({...me,avatar:av}))};
+  im.src=URL.createObjectURL(f);e.target.value=''};
+drawAcct();
+
+// 로비
+async function loadRooms(){
+  if($('#lobby').hidden)return;
+  const rs=await(await api('rooms')).json();
+  $('#rooms').replaceChildren(...rs.map(r=>{
+    const d=document.createElement('div');d.className='card row';
+    const t=document.createElement('span');t.textContent=`${r.name}  (${r.n}/${r.max})`;
+    d.append(t,btn(r.n>=r.max?'꽉 참':'입장',()=>join(r.id,r.name)));return d}))}
+async function addRoom(){
+  const name=$('#rn').value.trim();if(!name)return;
+  await api('rooms',{method:'POST',headers:hdr(),body:JSON.stringify({name,max:+$('#rm').value})});
+  $('#rn').value='';loadRooms()}
+setInterval(()=>loadRooms().catch(()=>{}),3000);loadRooms();
+
+// 방
+const send=(to,data)=>ws?.readyState==1&&ws.send(JSON.stringify({to,data}));
+async function join(id,title){
+  ctx=new(window.AudioContext||window.webkitAudioContext)();ctx.resume();
+  try{local=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}})}
+  catch{ctx.close();return alert('마이크 권한이 필요해')}
+  $('#lobby').hidden=true;$('#room').hidden=false;$('#rt').textContent=title;
+  const proto=location.protocol=='https:'?'wss':'ws';
+  ws=new WebSocket(`${proto}://${location.host}/ws?room=${id}`);
+  ws.onopen=()=>ws.send(JSON.stringify({name:me?.name||localStorage.nick||'',avatar:me?.avatar||null}));
+  ws.onmessage=e=>{q=q.then(()=>onMsg(JSON.parse(e.data))).catch(console.error)};
+  ws.onclose=()=>leave();
+  ping=setInterval(()=>ws.readyState==1&&ws.send('{}'),25000)}
+
+function leave(){
+  if(!local)return;
+  const w=ws;ws=null;w?.close();clearInterval(ping);
+  Object.values(timers).forEach(clearInterval);timers={};
+  Object.values(pcs).forEach(p=>p.close());pcs={};
+  local.getTracks().forEach(t=>t.stop());local=null;ctx?.close();
+  $('#grid').replaceChildren();$('#audios').replaceChildren();
+  $('#room').hidden=true;$('#lobby').hidden=false;loadRooms()}
+
+async function onMsg(m){
+  if(m.t=='err'){alert(m.m);return leave()}
+  if(!local)return;
+  if(m.t=='welcome'){tile(m.id,m.name,m.avatar,local);for(const p of m.peers){tile(p.id,p.name,p.avatar);await call(p.id)}}
+  if(m.t=='join')tile(m.id,m.name,m.avatar);
+  if(m.t=='leave'){pcs[m.id]?.close();delete pcs[m.id];clearInterval(timers[m.id]);$('#t'+m.id)?.remove();$('#a'+m.id)?.remove()}
+  if(m.t=='sig')await sig(m.from,m.data)}
+
+function tile(id,name,av,stream){
+  if($('#t'+id))return;
+  const t=document.createElement('div');t.id='t'+id;
+  const n=document.createElement('div');n.className='nm';n.textContent=name;
+  t.append(avatarEl(name,av),n);$('#grid').append(t);
+  if(stream)watch(id,stream)}
+
+// 말하는 중이면 타일에 speak 클래스 → 초록 원
+function watch(id,stream){
+  const an=ctx.createAnalyser();an.fftSize=512;ctx.createMediaStreamSource(stream).connect(an);
+  const b=new Uint8Array(an.fftSize);
+  timers[id]=setInterval(()=>{an.getByteTimeDomainData(b);let s=0;for(const v of b)s+=((v-128)/128)**2;
+    $('#t'+id)?.classList.toggle('speak',Math.sqrt(s/b.length)>.03)},100)}
+
+$('#mute').onclick=e=>{const t=local.getAudioTracks()[0];t.enabled=!t.enabled;
+  e.target.textContent=t.enabled?'🎤 마이크 끄기':'🔇 마이크 켜기'};
+
+// WebRTC (방 안 사람끼리 1:1로 연결)
+function pc(id){
+  if(pcs[id])return pcs[id];
+  const p=pcs[id]=new RTCPeerConnection(ICE);
+  local.getTracks().forEach(t=>p.addTrack(t,local));
+  p.onicecandidate=e=>e.candidate&&send(id,{ice:e.candidate});
+  p.ontrack=e=>{if($('#a'+id))return;
+    const a=document.createElement('audio');a.id='a'+id;a.srcObject=e.streams[0];a.autoplay=true;
+    $('#audios').append(a);a.play().catch(()=>{});watch(id,e.streams[0])};
+  return p}
+async function call(id){const p=pc(id);await p.setLocalDescription(await p.createOffer());send(id,{sdp:p.localDescription})}
+async function sig(from,d){
+  const p=pc(from);
+  if(d.sdp){await p.setRemoteDescription(d.sdp);
+    if(d.sdp.type=='offer'){await p.setLocalDescription(await p.createAnswer());send(from,{sdp:p.localDescription})}}
+  else if(d.ice)await p.addIceCandidate(d.ice).catch(()=>{})}
+</script>
+<script type="module">
+import {initializeApp} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
+import {getAuth,onAuthStateChanged,signInWithEmailAndPassword,createUserWithEmailAndPassword,updateProfile,signOut} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
+import {getFirestore,doc,getDoc,setDoc} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
+
+// ↓↓ Firebase 콘솔 > 프로젝트 설정 > 내 앱(웹)에서 복사한 값으로 교체
+const app=initializeApp({apiKey:"AIzaSyBNJjiLMgiBw8O8ewz8A-r0EWXFTHaf1zw",authDomain:"voiceroom-3f840.firebaseapp.com",projectId:"voiceroom-3f840",appId:"1:879518912682:web:a6c9df148e03c5d83c80d3"});
+const auth=getAuth(app),db=getFirestore(app);
+
+// 이름 → 가짜 이메일 (Firebase는 이메일 로그인만 되니까 이름을 해시해서 이메일처럼 씀)
+const mail=async n=>{const h=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(n));
+  return [...new Uint8Array(h)].slice(0,16).map(b=>b.toString(16).padStart(2,'0')).join('')+'@voiceroom.app'};
+
+window.fb={
+  async signup(n,p){
+    if([...n].length<2||[...n].length>12)throw {message:'이름은 2~12자로 해줘'};
+    const c=await createUserWithEmailAndPassword(auth,await mail(n),p);
+    await updateProfile(c.user,{displayName:n});setMe({name:n,avatar:null})},
+  async login(n,p){await signInWithEmailAndPassword(auth,await mail(n),p)},
+  logout:()=>signOut(auth),
+  saveAvatar:a=>setDoc(doc(db,'users',auth.currentUser.uid),{avatar:a})
+};
+onAuthStateChanged(auth,async u=>{
+  if(!u)return setMe(null);
+  const s=await getDoc(doc(db,'users',u.uid));
+  setMe({name:u.displayName||'손님',avatar:s.exists()?s.data().avatar:null})});
+</script></body></html>
