@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex"><title>보이스룸 관리자</title>
+<style>
+:root{color-scheme:dark;--bg:#07070d;--line:rgba(255,255,255,.1);--pri:#8b6bff;--pri2:#4d8dff;--red:#ff4d6d;--ok:#2ee59d;--mut:#9496b8}
+*{box-sizing:border-box}[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:#f5f5ff;font:15px/1.5 Pretendard,-apple-system,'Apple SD Gothic Neo','Noto Sans KR',system-ui,sans-serif;min-height:100dvh}
+.bg{position:fixed;inset:0;z-index:-1;background:radial-gradient(60vmax 60vmax at 0 0,rgba(106,60,255,.5),transparent 60%),radial-gradient(50vmax 50vmax at 100% 100%,rgba(0,184,217,.3),transparent 60%)}
+main{max-width:640px;margin:auto;padding:max(18px,env(safe-area-inset-top)) 18px 60px}
+h1{margin:0 0 4px;font-size:28px;letter-spacing:-.04em}.mut,small{color:var(--mut)}
+.eyebrow{margin:0;font-size:12px;letter-spacing:.18em;font-weight:700;color:var(--pri)}
+.box,.card{background:linear-gradient(160deg,rgba(255,255,255,.08),rgba(255,255,255,.03));border:1px solid var(--line);border-radius:22px;padding:16px;backdrop-filter:blur(20px);margin-top:14px}
+input{width:100%;background:rgba(255,255,255,.06);border:1px solid var(--line);border-radius:14px;padding:14px;color:#fff;font:inherit;outline:0;margin:12px 0}
+input:focus{border-color:var(--pri)}
+button{font:inherit;border:0;cursor:pointer;color:#fff;border-radius:13px;padding:11px 16px;font-weight:700;background:linear-gradient(135deg,var(--pri),var(--pri2))}
+button:active{transform:scale(.96)}
+.del{background:rgba(255,77,109,.16);color:var(--red)}
+#st{display:flex;gap:12px;margin-top:16px}#st div{flex:1;background:rgba(255,255,255,.06);border:1px solid var(--line);border-radius:18px;padding:14px;color:var(--mut)}
+#st b{display:block;font-size:30px;color:#fff;letter-spacing:-.03em}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.row b{display:block}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.chip{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,.08);border-radius:99px;padding:5px 6px 5px 12px}
+.chip button{padding:3px 9px;border-radius:99px;background:rgba(255,77,109,.2);color:var(--red);font-size:12px}
+#err{color:var(--red);min-height:1.4em;font-size:14px}
+</style></head><body><div class="bg"></div>
+<main id="login">
+  <p class="eyebrow">ADMIN</p><h1>관리자 로그인</h1>
+  <div class="box"><span class="mut">서버(Render)의 환경변수 ADMIN_PASSWORD 값을 입력하세요</span>
+    <input id="pw" type="password" placeholder="관리자 비밀번호" autocomplete="current-password">
+    <div id="err"></div><button style="width:100%" onclick="go()">들어가기</button></div>
+</main>
+<main id="dash" hidden>
+  <p class="eyebrow">ADMIN</p><h1>보이스룸 관리</h1><span class="mut">2초마다 자동 새로고침</span>
+  <div id="st"></div><div id="list"></div>
+  <button class="del" style="margin-top:22px" onclick="sessionStorage.removeItem('pw');pw='';load()">로그아웃</button>
+</main>
+<script>
+const $=s=>document.querySelector(s);let pw=sessionStorage.pw||'';
+async function api(p,body){
+  const r=await fetch('/api/admin/'+p,{method:body?'POST':'GET',headers:{'x-admin':pw,'content-type':'application/json'},body:body?JSON.stringify(body):undefined});
+  if(r.status==401)throw 401;return body?null:r.json()}
+async function load(first){
+  try{const rs=await api('rooms');$('#login').hidden=true;$('#dash').hidden=false;draw(rs)}
+  catch(e){if(e!==401)return;$('#dash').hidden=true;$('#login').hidden=false;
+    $('#err').textContent=first===true?'비밀번호가 틀렸거나 서버에 ADMIN_PASSWORD가 설정되지 않았어요':''}}
+function go(){pw=$('#pw').value;sessionStorage.pw=pw;load(true)}
+$('#pw').addEventListener('keydown',e=>{if(e.key=='Enter')go()});
+function draw(rs){
+  const n=rs.reduce((s,r)=>s+r.peers.length,0);
+  $('#st').innerHTML=`<div><b>${rs.length}</b>개의 방</div><div><b>${n}</b>명 접속 중</div>`;
+  const out=rs.map(card);
+  if(!out.length){const p=document.createElement('p');p.className='mut';p.textContent='열린 방이 없어요';out.push(p)}
+  $('#list').replaceChildren(...out)}
+function card(r){
+  const d=document.createElement('div');d.className='card';
+  const h=document.createElement('div');h.className='row';
+  const t=document.createElement('div');t.innerHTML='<b></b><small></small>';
+  t.querySelector('b').textContent=r.name;t.querySelector('small').textContent=`${r.peers.length}/${r.max}명 · ${r.id}`;
+  const del=document.createElement('button');del.className='del';del.textContent='방 삭제';
+  del.onclick=async()=>{if(confirm(`"${r.name}" 방을 삭제할까요? 접속 중인 사람은 모두 나가요.`)){await api('delete',{room:r.id});load()}};
+  h.append(t,del);d.append(h);
+  const w=document.createElement('div');w.className='chips';
+  r.peers.forEach(p=>{const c=document.createElement('span');c.className='chip';c.textContent=p.name;
+    const x=document.createElement('button');x.textContent='내보내기';x.onclick=async()=>{await api('kick',{room:r.id,peer:p.id});load()};
+    c.append(x);w.append(c)});
+  if(!r.peers.length)w.innerHTML='<small>아무도 없어요</small>';
+  d.append(w);return d}
+setInterval(()=>{if(!$('#dash').hidden)load()},2000);
+if(pw)load();
+</script></body></html>
