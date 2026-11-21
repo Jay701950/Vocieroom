@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
-    time::Duration,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use uuid::Uuid;
@@ -23,11 +23,14 @@ struct Peer {
     name: String,
     avatar: Option<String>,
     tx: UnboundedSender<Message>,
+    muted: bool,
+    forced: bool,
 }
 struct Room {
     name: String,
     max: usize,
     peers: HashMap<String, Peer>,
+    chat: Vec<Value>,
 }
 type Rooms = Arc<Mutex<HashMap<String, Room>>>;
 
@@ -56,7 +59,7 @@ async fn add_room(State(rooms): State<Rooms>, Json(b): Json<Value>) -> Result<Js
         return Err(StatusCode::TOO_MANY_REQUESTS);
     }
     let id = short();
-    rooms.insert(id.clone(), Room { name, max, peers: HashMap::new() });
+    rooms.insert(id.clone(), Room { name, max, peers: HashMap::new(), chat: Vec::new() });
     Ok(Json(json!({"id": id})))
 }
 
@@ -93,7 +96,7 @@ async fn run(rooms: Rooms, sock: WebSocket, room: String) {
         })
         .map(String::from);
 
-    let joined: Result<Vec<Value>, &str> = {
+    let joined: Result<(Vec<Value>, Vec<Value>), &str> = {
         let mut rs = rooms.lock().unwrap();
         match rs.get_mut(&room) {
             None => Err("없는 방이야"),
@@ -105,7 +108,7 @@ async fn run(rooms: Rooms, sock: WebSocket, room: String) {
                 let peers = r
                     .peers
                     .iter()
-                    .map(|(i, p)| json!({"id": i, "name": p.name, "avatar": p.avatar}))
+                    .map(|(i, p)| json!({"id": i, "name": p.name, "avatar": p.avatar, "muted": (p.muted || p.forced)}))
                     .collect();
                 let m = json!({"t": "join", "id": id, "name": name, "avatar": avatar}).to_string();
                 for p in r.peers.values() {
@@ -113,13 +116,13 @@ async fn run(rooms: Rooms, sock: WebSocket, room: String) {
                 }
                 r.peers.insert(
                     id.clone(),
-                    Peer { name: name.clone(), avatar: avatar.clone(), tx: tx.clone() },
+                    Peer { name: name.clone(), avatar: avatar.clone(), tx: tx.clone(), muted: false, forced: false },
                 );
-                Ok(peers)
+                Ok((peers, r.chat.clone()))
             }
         }
     };
-    let peers = match joined {
+    let (peers, chat) = match joined {
         Ok(p) => p,
         Err(m) => {
             let _ = sink.send(Message::Text(json!({"t": "err", "m": m}).to_string())).await;
@@ -127,7 +130,7 @@ async fn run(rooms: Rooms, sock: WebSocket, room: String) {
         }
     };
     let _ = tx.send(Message::Text(
-        json!({"t": "welcome", "id": id, "name": name, "avatar": avatar, "peers": peers}).to_string(),
+        json!({"t": "welcome", "id": id, "name": name, "avatar": avatar, "peers": peers, "chat": chat}).to_string(),
     ));
 
     let writer = tokio::spawn(async move {
@@ -138,6 +141,7 @@ async fn run(rooms: Rooms, sock: WebSocket, room: String) {
         }
     });
 
+    let mut last_chat = Instant::now().checked_sub(Duration::from_secs(1)).unwrap_or_else(Instant::now);
     // 시그널(offer/answer/ice)을 대상 사람에게 그대로 전달
     loop {
         // 60초 동안 아무 신호도 없으면(클라이언트는 25초마다 ping) 끊긴 것으로 보고 정리
@@ -148,6 +152,38 @@ async fn run(rooms: Rooms, sock: WebSocket, room: String) {
         match m {
             Message::Text(t) => {
                 let Ok(v) = serde_json::from_str::<Value>(&t) else { continue };
+                // 채팅: 서버 메모리에만 최근 100개 보관, 도배 방지(0.35초)
+                if let Some(txt) = v["chat"].as_str() {
+                    let txt: String = txt.trim().chars().take(300).collect();
+                    if txt.is_empty() || last_chat.elapsed() < Duration::from_millis(350) {
+                        continue;
+                    }
+                    last_chat = Instant::now();
+                    if let Some(r) = rooms.lock().unwrap().get_mut(&room) {
+                        let who = r.peers.get(&id).map(|p| p.name.clone()).unwrap_or_default();
+                        let ts = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+                        let m = json!({"t": "chat", "id": id, "name": who, "text": txt, "ts": ts});
+                        r.chat.push(m.clone());
+                        if r.chat.len() > 100 {
+                            r.chat.remove(0);
+                        }
+                        broadcast(r, &m.to_string());
+                    }
+                    continue;
+                }
+                // 내가 음소거/해제하면 방 사람들에게 상태 전달 (강제 음소거 중이면 무시)
+                if let Some(mu) = v["muted"].as_bool() {
+                    if let Some(r) = rooms.lock().unwrap().get_mut(&room) {
+                        if let Some(p) = r.peers.get_mut(&id) {
+                            if !p.forced {
+                                p.muted = mu;
+                            }
+                        }
+                        let (mu, f) = r.peers.get(&id).map(|p| (p.muted, p.forced)).unwrap_or((false, false));
+                        broadcast(r, &json!({"t": "state", "id": id, "muted": mu, "forced": f}).to_string());
+                    }
+                    continue;
+                }
                 let out = json!({"t": "sig", "from": id, "data": v["data"]}).to_string();
                 let to = v["to"].as_str().unwrap_or("");
                 if let Some(p) = rooms.lock().unwrap().get(&room).and_then(|r| r.peers.get(to)) {
@@ -162,6 +198,9 @@ async fn run(rooms: Rooms, sock: WebSocket, room: String) {
     writer.abort();
     if let Some(r) = rooms.lock().unwrap().get_mut(&room) {
         r.peers.remove(&id);
+        if r.peers.is_empty() {
+            r.chat.clear(); // 방이 비면 채팅 기록 삭제
+        }
         let m = json!({"t": "leave", "id": id}).to_string();
         for p in r.peers.values() {
             let _ = p.tx.send(Message::Text(m.clone()));
@@ -190,7 +229,7 @@ async fn admin_rooms(State(rooms): State<Rooms>, h: HeaderMap) -> Result<Json<Va
     let list: Vec<Value> = rooms
         .iter()
         .map(|(id, r)| {
-            let peers: Vec<Value> = r.peers.iter().map(|(i, p)| json!({"id": i, "name": p.name})).collect();
+            let peers: Vec<Value> = r.peers.iter().map(|(i, p)| json!({"id": i, "name": p.name, "forced": p.forced})).collect();
             json!({"id": id, "name": r.name, "max": r.max, "peers": peers})
         })
         .collect();
@@ -221,6 +260,30 @@ async fn admin_delete(State(rooms): State<Rooms>, h: HeaderMap, Json(b): Json<Va
     StatusCode::OK
 }
 
+fn broadcast(r: &Room, m: &str) {
+    for p in r.peers.values() {
+        let _ = p.tx.send(Message::Text(m.to_string()));
+    }
+}
+
+async fn admin_mute(State(rooms): State<Rooms>, h: HeaderMap, Json(b): Json<Value>) -> StatusCode {
+    if !is_admin(&h) {
+        return StatusCode::UNAUTHORIZED;
+    }
+    let on = b["on"].as_bool().unwrap_or(true);
+    let room = b["room"].as_str().unwrap_or("");
+    let peer = b["peer"].as_str().unwrap_or("");
+    if let Some(r) = rooms.lock().unwrap().get_mut(room) {
+        if let Some(p) = r.peers.get_mut(peer) {
+            p.forced = on;
+            p.muted = on;
+            let m = json!({"t": "state", "id": peer, "muted": on, "forced": on}).to_string();
+            broadcast(r, &m);
+        }
+    }
+    StatusCode::OK
+}
+
 #[tokio::main]
 async fn main() {
     let rooms: Rooms = Arc::new(Mutex::new(HashMap::new()));
@@ -232,6 +295,7 @@ async fn main() {
         .route("/api/admin/rooms", get(admin_rooms))
         .route("/api/admin/kick", post(admin_kick))
         .route("/api/admin/delete", post(admin_delete))
+        .route("/api/admin/mute", post(admin_mute))
         .with_state(rooms);
 
     let port = std::env::var("PORT").unwrap_or("3000".into());
