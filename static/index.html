@@ -101,6 +101,32 @@ input[type=range]::-moz-range-thumb{width:36px;height:36px;border-radius:50%;bac
 .round.off{background:var(--red);box-shadow:0 8px 22px -6px rgba(255,77,109,.8)}
 .leave{background:linear-gradient(135deg,#ff5d7a,#ff3b5c);color:#fff;font-weight:700;border-radius:99px;height:58px;padding:0 28px;box-shadow:0 10px 24px -8px rgba(255,59,92,.8),inset 0 1px 0 rgba(255,255,255,.35)}
 .toast{position:fixed;left:50%;bottom:calc(120px + env(safe-area-inset-bottom));transform:translateX(-50%);background:rgba(34,36,60,.96);border:1px solid var(--line);padding:12px 20px;border-radius:99px;z-index:50;white-space:nowrap;animation:fade .25s;box-shadow:0 14px 40px -10px rgba(0,0,0,.8)}
+
+::selection{background:rgba(139,107,255,.4)}
+*{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.2) transparent}
+body::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;background:radial-gradient(120% 80% at 50% 0,transparent 45%,rgba(0,0,0,.55))}
+main{animation:fade .5s both}
+header{position:sticky;top:0;z-index:6;margin:0 -18px 8px;padding:10px 18px 16px;background:linear-gradient(rgba(7,7,13,.9),rgba(7,7,13,.5) 75%,transparent);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
+.rcard{transition:transform .25s cubic-bezier(.3,1.4,.5,1),box-shadow .25s}.rcard:active{transform:scale(.985)}
+.ric{position:relative}
+.live .ric::after{content:'';position:absolute;right:-4px;top:-4px;width:14px;height:14px;border-radius:50%;background:var(--ok);border:3px solid #15162a;animation:pulse 1.8s ease-out infinite}
+#grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:14px}
+.tile{position:relative;padding:24px 10px 18px;border-radius:28px;background:linear-gradient(160deg,rgba(255,255,255,.075),rgba(255,255,255,.02));border:1px solid var(--line);backdrop-filter:blur(18px);transition:border-color .25s,box-shadow .25s,background .25s}
+.tile.speak{border-color:rgba(46,229,157,.55);background:linear-gradient(160deg,rgba(46,229,157,.14),rgba(255,255,255,.02));box-shadow:0 0 0 1px rgba(46,229,157,.3),0 24px 50px -22px rgba(46,229,157,.7)}
+.av{transform:scale(calc(1 + var(--lv,0)*.1));transition:box-shadow .2s,filter .2s,transform .1s linear}
+.mb{position:absolute;right:-2px;bottom:-2px;width:32px;height:32px;border-radius:50%;background:var(--red);display:none;place-items:center;border:3px solid #15162a;z-index:2;color:#fff}
+.muted .mb{display:grid}.mb svg{width:15px;height:15px}
+.muted .av{filter:grayscale(.45) brightness(.8)}
+.round{position:relative}
+.bd{position:absolute;top:0;right:0;min-width:21px;height:21px;padding:0 5px;border-radius:99px;background:var(--red);font-size:11px;font-weight:800;display:grid;place-items:center;border:2px solid #1a1c30;animation:pop .3s}
+.chatp{display:flex;flex-direction:column;height:min(80dvh,660px)}
+#msgs{flex:1;overflow-y:auto;margin:14px -8px;padding:0 8px;display:flex;flex-direction:column;gap:9px;overscroll-behavior:contain}
+.msg{max-width:84%;padding:10px 14px;border-radius:20px 20px 20px 6px;background:rgba(255,255,255,.08);border:1px solid var(--line);align-self:flex-start;animation:up .25s both;word-break:break-word;white-space:pre-wrap}
+.msg.mine{align-self:flex-end;border-radius:20px 20px 6px 20px;background:linear-gradient(135deg,var(--pri),var(--pri2));border-color:transparent}
+.msg .who{display:block;font-size:12px;font-weight:700;color:#b9a6ff;margin-bottom:2px}
+.msg time{display:block;font-size:10px;opacity:.55;margin-top:3px;text-align:right}
+.cin{display:flex;gap:10px;align-items:center}.cin input{margin:0}
+.send{flex:none;width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,var(--pri),var(--pri2));color:#fff;display:grid;place-items:center;box-shadow:0 10px 24px -8px rgba(139,107,255,.9)}
 </style></head><body>
 <div class="bg"></div><div class="grain"></div>
 <div id="app">
@@ -115,7 +141,7 @@ input[type=range]::-moz-range-thumb{width:36px;height:36px;border-radius:50%;bac
   <main id="room" hidden>
     <div class="rhead"><button class="back" onclick="leave()" aria-label="뒤로"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><div><h2 id="rt"></h2><span class="pill" id="rc"></span></div></div>
     <div id="grid"></div>
-    <div class="dock"><button class="round" id="mute" aria-label="마이크"></button><button class="leave" onclick="leave()">나가기</button></div>
+    <div class="dock"><button class="round" id="mute" aria-label="마이크"></button><button class="round" id="chatb" aria-label="채팅"><span class="bd" id="bd" hidden></span></button><button class="leave" onclick="leave()">나가기</button></div>
   </main>
 </div>
 
@@ -147,6 +173,12 @@ input[type=range]::-moz-range-thumb{width:36px;height:36px;border-radius:50%;bac
   <button class="ghost wide" onclick="closeSheet('mNick');openSheet('mAuth')">로그인 · 회원가입</button>
 </div></div>
 
+<div class="sheet" id="mChat"><div class="panel chatp">
+  <h3>채팅</h3><span class="hint" style="margin:0">방이 비면 대화는 사라져요</span>
+  <div id="msgs"></div>
+  <div class="cin"><input id="ci" maxlength="300" placeholder="메시지를 입력하세요" autocomplete="off"><button class="send" id="cs" aria-label="보내기"></button></div>
+</div></div>
+
 <div id="audios"></div>
 <input type="file" id="f" accept="image/*" hidden>
 
@@ -158,13 +190,14 @@ const SV=d=>`<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke=
 const IC={mic:SV('<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v4"/>'),off:SV('<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v4M3 3l18 18"/>')};
 const EYE=SV('<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>'),
 EYEOFF=SV('<path d="M3 3l18 18"/><path d="M10.6 6.1A10.7 10.7 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.7A17 17 0 0 0 2 12s3.6 7 10 7a10 10 0 0 0 4.2-.9"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>');
-$('#mute').innerHTML=IC.mic;$('#eye').innerHTML=EYE;
+IC.chat=SV('<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1.1-4.3A8 8 0 1 1 21 12z"/>');IC.send=SV('<path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>');
+$('#mute').innerHTML=IC.mic;$('#eye').innerHTML=EYE;$('#chatb').insertAdjacentHTML('afterbegin',IC.chat);$('#cs').innerHTML=IC.send;
 $('#eye').onclick=()=>{const p=$('#p'),h=p.type=='password';p.type=h?'text':'password';$('#eye').innerHTML=h?EYEOFF:EYE;p.focus()};
 // TURN 서버가 있으면 아래 주석 풀고 주소/아이디/비번 넣기 (연결 안 되거나 끊기는 문제의 제일 큰 해결책)
 const ICE={iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}
   /* ,{urls:'turn:서버주소:443?transport=tcp',username:'아이디',credential:'비번'} */],
   iceCandidatePoolSize:4,bundlePolicy:'max-bundle'};
-let me=JSON.parse(localStorage.me||'null'),ws,local,ctx,ping,wl,pend,curMax=0,lastRooms='',mode='login',pcs={},timers={},q=Promise.resolve();
+let me=JSON.parse(localStorage.me||'null'),myId,forcedMute=false,unread=0,ws,local,ctx,ping,wl,pend,curMax=0,lastRooms='',mode='login',pcs={},timers={},q=Promise.resolve();
 
 function toast(m){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.append(t);setTimeout(()=>t.remove(),2600)}
 const openSheet=id=>$('#'+id).classList.add('open'),closeSheet=id=>$('#'+id).classList.remove('open');
@@ -217,7 +250,7 @@ async function addRoom(){
 
 // 로비
 function roomCard(r){
-  const d=document.createElement('div');d.className='rcard'+(r.n>=r.max?' full':'');
+  const d=document.createElement('div');d.className='rcard'+(r.n>=r.max?' full':'')+(r.n?' live':'');
   const ic=document.createElement('div');ic.className='ric';const h=hue(r.name);
   ic.style.background=`linear-gradient(135deg,hsl(${h} 80% 60%),hsl(${(h+50)%360} 80% 45%))`;ic.textContent=[...r.name][0];
   const mid=document.createElement('div');mid.className='mid';
@@ -267,23 +300,25 @@ function leave(){
   Object.values(timers).forEach(clearInterval);timers={};
   Object.values(pcs).forEach(p=>p.close());pcs={};
   local.getTracks().forEach(t=>t.stop());local=null;ctx?.close();wl?.release().catch(()=>{});wl=null;
-  $('#grid').replaceChildren();$('#audios').replaceChildren();$('#mute').innerHTML=IC.mic;$('#mute').classList.remove('off');
+  $('#grid').replaceChildren();$('#audios').replaceChildren();$('#mute').innerHTML=IC.mic;$('#mute').classList.remove('off');$('#msgs').replaceChildren();unread=0;badge();closeSheet('mChat');myId=null;forcedMute=false;
   $('#room').hidden=true;$('#lobby').hidden=false;$('#fab').hidden=false;lastRooms='';loadRooms()}
 
 async function onMsg(m){
   if(m.t=='err'){toast(m.m);return leave()}
   if(!local)return;
-  if(m.t=='welcome'){tile(m.id,m.name,m.avatar,local);for(const p of m.peers){tile(p.id,p.name,p.avatar);await call(p.id)}}
+  if(m.t=='welcome'){myId=m.id;tile(m.id,m.name,m.avatar,local);(m.chat||[]).forEach(x=>addMsg(x,true));for(const p of m.peers){tile(p.id,p.name,p.avatar,null,p.muted);await call(p.id)}}
+  if(m.t=='chat')addMsg(m);
+  if(m.t=='state')onState(m);
   if(m.t=='join')tile(m.id,m.name,m.avatar);
   if(m.t=='leave'){pcs[m.id]?.close();delete pcs[m.id];clearInterval(timers[m.id]);$('#t'+m.id)?.remove();$('#a'+m.id)?.remove();rc()}
   if(m.t=='sig')await sig(m.from,m.data)}
 
-function tile(id,name,av,stream){
+function tile(id,name,av,stream,muted){
   if($('#t'+id))return;
   const t=document.createElement('div');t.id='t'+id;t.className='tile';
-  const w=document.createElement('div');w.className='av-wrap';w.append(avatarEl(name,av));
+  const w=document.createElement('div');w.className='av-wrap';w.append(avatarEl(name,av));const mb=document.createElement('div');mb.className='mb';mb.innerHTML=IC.off;w.append(mb);
   const n=document.createElement('div');n.className='nm';n.textContent=name;
-  t.append(w,n);$('#grid').append(t);rc();
+  t.append(w,n);$('#grid').append(t);rc();if(muted)t.classList.add('muted');
   if(stream){t.classList.add('me');watch(id,stream)}}
 
 // 말하는 중이면 타일에 speak 클래스 → 초록 원
@@ -291,9 +326,9 @@ function watch(id,stream){
   const an=ctx.createAnalyser();an.fftSize=512;ctx.createMediaStreamSource(stream).connect(an);
   const b=new Uint8Array(an.fftSize);
   timers[id]=setInterval(()=>{an.getByteTimeDomainData(b);let s=0;for(const v of b)s+=((v-128)/128)**2;
-    $('#t'+id)?.classList.toggle('speak',Math.sqrt(s/b.length)>.03)},100)}
+    const r=Math.sqrt(s/b.length),t=$('#t'+id);if(t){t.classList.toggle('speak',r>.03);t.style.setProperty('--lv',Math.min(1,r*7).toFixed(2))}},80)}
 
-$('#mute').onclick=e=>{const t=local.getAudioTracks()[0];t.enabled=!t.enabled;
+$('#mute').onclick=e=>{if(forcedMute)return toast('관리자가 음소거한 상태예요');const t=local.getAudioTracks()[0];t.enabled=!t.enabled;ws?.send(JSON.stringify({muted:!t.enabled}));
   const b=e.currentTarget;b.innerHTML=t.enabled?IC.mic:IC.off;b.classList.toggle('off',!t.enabled)};
 
 // 음질/안정성: 높은 비트레이트 + 우선순위, 화면 꺼짐 방지
@@ -306,6 +341,28 @@ async function tune(p){
     await s.setParameters(r).catch(()=>{})}}
 async function wake(){try{wl=await navigator.wakeLock?.request('screen')}catch{}}
 document.addEventListener('visibilitychange',()=>{if(document.hidden||!local)return;ctx?.resume();wake()});
+
+// 채팅 (서버 메모리에만 저장, 방이 비면 사라짐)
+const badge=()=>{const b=$('#bd');b.hidden=!unread;b.textContent=unread>9?'9+':unread};
+function addMsg(m,hist){
+  const box=$('#msgs'),mine=m.id==myId,d=document.createElement('div');d.className='msg'+(mine?' mine':'');
+  if(!mine){const w=document.createElement('span');w.className='who';w.textContent=m.name;d.append(w)}
+  const tx=document.createElement('span');tx.textContent=m.text;d.append(tx);
+  const tm=document.createElement('time');tm.textContent=new Date(m.ts).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'});d.append(tm);
+  const near=box.scrollHeight-box.scrollTop-box.clientHeight<120;
+  box.append(d);if(mine||near||hist)box.scrollTop=box.scrollHeight;
+  if(!hist&&!mine&&!$('#mChat').classList.contains('open')){unread++;badge()}}
+function openChat(){openSheet('mChat');unread=0;badge();setTimeout(()=>{$('#msgs').scrollTop=$('#msgs').scrollHeight},320)}
+function sendChat(){const i=$('#ci'),t=i.value.trim();if(!t||ws?.readyState!=1)return;ws.send(JSON.stringify({chat:t}));i.value='';i.focus()}
+$('#cs').onclick=sendChat;$('#chatb').onclick=openChat;
+$('#ci').addEventListener('keydown',e=>{if(e.key=='Enter')sendChat()});
+// 음소거 상태 표시 + 관리자 강제 음소거 처리
+function onState(m){
+  $('#t'+m.id)?.classList.toggle('muted',!!(m.muted||m.forced));
+  if(m.id!=myId||!local)return;
+  const tr=local.getAudioTracks()[0],b=$('#mute');
+  if(m.forced){forcedMute=true;tr.enabled=false;b.innerHTML=IC.off;b.classList.add('off');toast('관리자가 마이크를 음소거했어요')}
+  else if(forcedMute){forcedMute=false;tr.enabled=true;b.innerHTML=IC.mic;b.classList.remove('off');toast('음소거가 해제됐어요')}}
 
 // WebRTC (방 안 사람끼리 1:1로 연결)
 function pc(id){
