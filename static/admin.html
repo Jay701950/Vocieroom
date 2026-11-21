@@ -23,6 +23,7 @@ button:active{transform:scale(.96)}
 .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
 .chip{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,.08);border-radius:99px;padding:5px 6px 5px 12px}
 .chip button{padding:3px 9px;border-radius:99px;background:rgba(255,77,109,.2);color:var(--red);font-size:12px}
+.chip .mu{background:rgba(255,255,255,.12);color:#fff}.chip .mu.on{background:rgba(255,184,0,.2);color:#ffb800}
 #err{color:var(--red);min-height:1.4em;font-size:14px}
 </style></head><body><div class="bg"></div>
 <main id="login">
@@ -64,7 +65,8 @@ function card(r){
   const w=document.createElement('div');w.className='chips';
   r.peers.forEach(p=>{const c=document.createElement('span');c.className='chip';c.textContent=p.name;
     const x=document.createElement('button');x.textContent='내보내기';x.onclick=async()=>{await api('kick',{room:r.id,peer:p.id});load()};
-    c.append(x);w.append(c)});
+    const m=document.createElement('button');m.className='mu'+(p.forced?' on':'');m.textContent=p.forced?'음소거 해제':'강제 음소거';m.onclick=async()=>{await api('mute',{room:r.id,peer:p.id,on:!p.forced});load()};
+    c.append(m,x);w.append(c)});
   if(!r.peers.length)w.innerHTML='<small>아무도 없어요</small>';
   d.append(w);return d}
 setInterval(()=>{if(!$('#dash').hidden)load()},2000);
