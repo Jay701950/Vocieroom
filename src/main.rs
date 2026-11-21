@@ -3,9 +3,9 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         Query, State,
     },
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{Html, Response},
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
 use futures_util::{SinkExt, StreamExt};
@@ -14,6 +14,7 @@ use serde_json::{json, Value};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use uuid::Uuid;
@@ -96,6 +97,9 @@ async fn run(rooms: Rooms, sock: WebSocket, room: String) {
         let mut rs = rooms.lock().unwrap();
         match rs.get_mut(&room) {
             None => Err("없는 방이야"),
+            Some(r) if r.peers.values().any(|p| p.name.to_lowercase() == name.to_lowercase()) => {
+                Err("같은 이름이 이미 방에 있어요")
+            }
             Some(r) if r.peers.len() >= r.max => Err("방이 꽉 찼어"),
             Some(r) => {
                 let peers = r
@@ -135,7 +139,12 @@ async fn run(rooms: Rooms, sock: WebSocket, room: String) {
     });
 
     // 시그널(offer/answer/ice)을 대상 사람에게 그대로 전달
-    while let Some(Ok(m)) = stream.next().await {
+    loop {
+        // 60초 동안 아무 신호도 없으면(클라이언트는 25초마다 ping) 끊긴 것으로 보고 정리
+        let m = match tokio::time::timeout(Duration::from_secs(60), stream.next()).await {
+            Ok(Some(Ok(m))) => m,
+            _ => break,
+        };
         match m {
             Message::Text(t) => {
                 let Ok(v) = serde_json::from_str::<Value>(&t) else { continue };
@@ -160,6 +169,58 @@ async fn run(rooms: Rooms, sock: WebSocket, room: String) {
     }
 }
 
+// ---- 관리자 (환경변수 ADMIN_PASSWORD 가 설정돼 있어야 동작) ----
+fn is_admin(h: &HeaderMap) -> bool {
+    match std::env::var("ADMIN_PASSWORD") {
+        Ok(p) if !p.is_empty() => h.get("x-admin").and_then(|v| v.to_str().ok()) == Some(p.as_str()),
+        _ => false,
+    }
+}
+
+fn kick_msg(p: &Peer, m: &str) {
+    let _ = p.tx.send(Message::Text(json!({"t": "err", "m": m}).to_string()));
+    let _ = p.tx.send(Message::Close(None));
+}
+
+async fn admin_rooms(State(rooms): State<Rooms>, h: HeaderMap) -> Result<Json<Value>, StatusCode> {
+    if !is_admin(&h) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    let rooms = rooms.lock().unwrap();
+    let list: Vec<Value> = rooms
+        .iter()
+        .map(|(id, r)| {
+            let peers: Vec<Value> = r.peers.iter().map(|(i, p)| json!({"id": i, "name": p.name})).collect();
+            json!({"id": id, "name": r.name, "max": r.max, "peers": peers})
+        })
+        .collect();
+    Ok(Json(Value::Array(list)))
+}
+
+async fn admin_kick(State(rooms): State<Rooms>, h: HeaderMap, Json(b): Json<Value>) -> StatusCode {
+    if !is_admin(&h) {
+        return StatusCode::UNAUTHORIZED;
+    }
+    let room = b["room"].as_str().unwrap_or("");
+    let peer = b["peer"].as_str().unwrap_or("");
+    if let Some(p) = rooms.lock().unwrap().get(room).and_then(|r| r.peers.get(peer)) {
+        kick_msg(p, "관리자에 의해 퇴장됐어요");
+    }
+    StatusCode::OK
+}
+
+async fn admin_delete(State(rooms): State<Rooms>, h: HeaderMap, Json(b): Json<Value>) -> StatusCode {
+    if !is_admin(&h) {
+        return StatusCode::UNAUTHORIZED;
+    }
+    if let Some(r) = rooms.lock().unwrap().remove(b["room"].as_str().unwrap_or("")) {
+        for p in r.peers.values() {
+            kick_msg(p, "방이 삭제됐어요");
+        }
+    }
+    StatusCode::OK
+}
+
 #[tokio::main]
 async fn main() {
     let rooms: Rooms = Arc::new(Mutex::new(HashMap::new()));
@@ -167,6 +228,10 @@ async fn main() {
         .route("/", get(|| async { Html(include_str!("../static/index.html")) }))
         .route("/api/rooms", get(list_rooms).post(add_room))
         .route("/ws", get(ws_handler))
+        .route("/admin", get(|| async { Html(include_str!("../static/admin.html")) }))
+        .route("/api/admin/rooms", get(admin_rooms))
+        .route("/api/admin/kick", post(admin_kick))
+        .route("/api/admin/delete", post(admin_delete))
         .with_state(rooms);
 
     let port = std::env::var("PORT").unwrap_or("3000".into());
